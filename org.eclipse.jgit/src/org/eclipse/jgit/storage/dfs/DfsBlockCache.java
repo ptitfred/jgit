@@ -224,6 +224,21 @@ public final class DfsBlockCache {
 		return getCurrentSize() * 100 / maxBytes;
 	}
 
+	/** @return number of requests for items in the cache. */
+	public long getHitCount() {
+		return statHit.get();
+	}
+
+	/** @return number of requests for items not in the cache. */
+	public long getMissCount() {
+		return statMiss.get();
+	}
+
+	/** @return total number of requests (hit + miss). */
+	public long getTotalRequestCount() {
+		return getHitCount() + getMissCount();
+	}
+
 	/** @return 0..100, defining number of cache hits. */
 	public long getHitRatio() {
 		long hits = statHit.get();
@@ -299,8 +314,10 @@ public final class DfsBlockCache {
 		int slot = slot(key, position);
 		HashEntry e1 = table.get(slot);
 		DfsBlock v = scan(e1, key, position);
-		if (v != null)
+		if (v != null) {
+			statHit.incrementAndGet();
 			return v;
+		}
 
 		reserveSpace(blockSize);
 		ReentrantLock regionLock = lockFor(key, position);
@@ -310,6 +327,7 @@ public final class DfsBlockCache {
 			if (e2 != e1) {
 				v = scan(e2, key, position);
 				if (v != null) {
+					statHit.incrementAndGet();
 					creditSpace(blockSize);
 					return v;
 				}
@@ -453,6 +471,8 @@ public final class DfsBlockCache {
 		T val = (T) scan(table.get(slot(key, position)), key, position);
 		if (val == null)
 			statMiss.incrementAndGet();
+		else
+			statHit.incrementAndGet();
 		return val;
 	}
 
@@ -484,17 +504,8 @@ public final class DfsBlockCache {
 
 	@SuppressWarnings("unchecked")
 	private <T> T scan(HashEntry n, DfsPackKey pack, long position) {
-		for (; n != null; n = n.next) {
-			Ref<T> r = n.ref;
-			if (r.pack != pack || r.position != position)
-				continue;
-			T v = r.get();
-			if (v == null)
-				return null;
-			statHit.incrementAndGet();
-			return v;
-		}
-		return null;
+		Ref<T> r = scanRef(n, pack, position);
+		return r != null ? r.get() : null;
 	}
 
 	@SuppressWarnings("unchecked")
